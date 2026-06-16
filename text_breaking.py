@@ -255,7 +255,18 @@ class GreedyLineBreaker:
                 word_count += 1
                 i += 1
             else:
+                if i < len(words) and words[i].is_punctuation and word_count > 0:
+                    current_width += additional_width
+                    word_count += 1
+                    i += 1
+                    continue
+                
                 end_idx = i - 1
+                
+                if end_idx >= current_start and i < len(words) and words[i].is_punctuation and end_idx + 1 < len(words):
+                    end_idx = i
+                    i += 1
+                
                 line_words = words[current_start:end_idx + 1]
                 num_spaces = 0
                 for j in range(len(line_words) - 1):
@@ -292,7 +303,59 @@ class GreedyLineBreaker:
             line = self._make_line(line_words, break_point, num_spaces, is_last=True)
             lines.append(line)
         
+        lines = self._fix_punctuation_orphans(lines, words)
+        
         return LayoutResult(lines=lines, total_penalty=total_penalty, algorithm="greedy")
+    
+    def _fix_punctuation_orphans(self, lines: List[Line], all_words: List[Word]) -> List[Line]:
+        if len(lines) < 2:
+            return lines
+        
+        fixed = []
+        i = 0
+        while i < len(lines):
+            current_line = lines[i]
+            is_last_line = (i == len(lines) - 1)
+            
+            if current_line.words and current_line.words[0].is_punctuation and i > 0 and not is_last_line:
+                prev_line = fixed[-1]
+                punct_word = current_line.words[0]
+                
+                new_prev_words = prev_line.words + [punct_word]
+                new_prev_num_spaces = 0
+                for j in range(len(new_prev_words) - 1):
+                    if not new_prev_words[j + 1].is_punctuation:
+                        new_prev_num_spaces += 1
+                
+                new_prev_bp = prev_line.break_point
+                if new_prev_bp:
+                    new_prev_bp = BreakPoint(
+                        word_index=prev_line.break_point.word_index + 1,
+                        type=prev_line.break_point.type,
+                        penalty=prev_line.break_point.penalty,
+                        hyphenated_text=prev_line.break_point.hyphenated_text,
+                        remaining_text=prev_line.break_point.remaining_text
+                    )
+                
+                new_prev_line = self._make_line(new_prev_words, new_prev_bp, new_prev_num_spaces, is_last=(i == len(lines) - 1 and len(current_line.words) == 1))
+                fixed[-1] = new_prev_line
+                
+                if len(current_line.words) > 1:
+                    remaining_words = current_line.words[1:]
+                    new_num_spaces = 0
+                    for j in range(len(remaining_words) - 1):
+                        if not remaining_words[j + 1].is_punctuation:
+                            new_num_spaces += 1
+                    
+                    new_bp = current_line.break_point
+                    new_line = self._make_line(remaining_words, new_bp, new_num_spaces, is_last=(i == len(lines) - 1))
+                    fixed.append(new_line)
+            else:
+                fixed.append(current_line)
+            
+            i += 1
+        
+        return fixed
     
     def _make_line(self, words: List[Word], break_point: BreakPoint, num_spaces: int, is_last: bool = False) -> Line:
         line_width = compute_line_width(words, 0, len(words) - 1, break_point, self.space_glue)
@@ -357,6 +420,9 @@ class KnuthPlassLineBreaker:
                 if bp.word_index != i - 1:
                     continue
                 
+                if i == n and bp.type != BreakPointType.FORCED:
+                    continue
+                
                 for j in range(0, i):
                     if dp[j] == float('inf'):
                         continue
@@ -413,7 +479,59 @@ class KnuthPlassLineBreaker:
         lines.reverse()
         total_penalty = dp[n] if dp[n] != float('inf') else 0.0
         
+        lines = self._fix_punctuation_orphans(lines, words)
+        
         return LayoutResult(lines=lines, total_penalty=total_penalty, algorithm="knuth-plass")
+    
+    def _fix_punctuation_orphans(self, lines: List[Line], all_words: List[Word]) -> List[Line]:
+        if len(lines) < 2:
+            return lines
+        
+        fixed = []
+        i = 0
+        while i < len(lines):
+            current_line = lines[i]
+            is_last_line = (i == len(lines) - 1)
+            
+            if current_line.words and current_line.words[0].is_punctuation and i > 0 and not is_last_line:
+                prev_line = fixed[-1]
+                punct_word = current_line.words[0]
+                
+                new_prev_words = prev_line.words + [punct_word]
+                new_prev_num_spaces = 0
+                for j in range(len(new_prev_words) - 1):
+                    if not new_prev_words[j + 1].is_punctuation:
+                        new_prev_num_spaces += 1
+                
+                new_prev_bp = prev_line.break_point
+                if new_prev_bp:
+                    new_prev_bp = BreakPoint(
+                        word_index=prev_line.break_point.word_index + 1,
+                        type=prev_line.break_point.type,
+                        penalty=prev_line.break_point.penalty,
+                        hyphenated_text=prev_line.break_point.hyphenated_text,
+                        remaining_text=prev_line.break_point.remaining_text
+                    )
+                
+                new_prev_line = self._make_line(new_prev_words, new_prev_bp, new_prev_num_spaces, is_last=(i == len(lines) - 1 and len(current_line.words) == 1))
+                fixed[-1] = new_prev_line
+                
+                if len(current_line.words) > 1:
+                    remaining_words = current_line.words[1:]
+                    new_num_spaces = 0
+                    for j in range(len(remaining_words) - 1):
+                        if not remaining_words[j + 1].is_punctuation:
+                            new_num_spaces += 1
+                    
+                    new_bp = current_line.break_point
+                    new_line = self._make_line(remaining_words, new_bp, new_num_spaces, is_last=(i == len(lines) - 1))
+                    fixed.append(new_line)
+            else:
+                fixed.append(current_line)
+            
+            i += 1
+        
+        return fixed
     
     def _make_line(self, words: List[Word], break_point: BreakPoint, num_spaces: int, is_last: bool = False) -> Line:
         line_width = compute_line_width(words, 0, len(words) - 1, break_point, self.space_glue)
@@ -445,13 +563,18 @@ class Typesetter:
     
     def render(self, layout: LayoutResult) -> str:
         rendered_lines = []
+        pending_remaining = None
         
         for line in layout.lines:
-            rendered_lines.append(self._render_line(line))
+            rendered_lines.append(self._render_line(line, pending_remaining))
+            if line.break_point and line.break_point.type == BreakPointType.HYPHEN:
+                pending_remaining = line.break_point.remaining_text
+            else:
+                pending_remaining = None
         
         return '\n'.join(rendered_lines)
     
-    def _render_line(self, line: Line) -> str:
+    def _render_line(self, line: Line, pending_remaining: Optional[str] = None) -> str:
         words = line.words
         if not words:
             return ''
@@ -460,11 +583,11 @@ class Typesetter:
         num_spaces = len(words) - 1
         
         if self.justify and not is_last_line and num_spaces > 0:
-            return self._render_justified(line, words, num_spaces)
+            return self._render_justified(line, words, num_spaces, pending_remaining)
         else:
-            return self._render_flush_left(line, words)
+            return self._render_flush_left(line, words, pending_remaining)
     
-    def _render_justified(self, line: Line, words: List[Word], num_spaces: int) -> str:
+    def _render_justified(self, line: Line, words: List[Word], num_spaces: int, pending_remaining: Optional[str] = None) -> str:
         natural_width = sum(w.width for w in words) + num_spaces * line.glue.ideal_width
         deficit = self.target_width - natural_width
         
@@ -478,10 +601,19 @@ class Typesetter:
         
         result = []
         for i, word in enumerate(words):
+            text_to_add = ''
+            
             if i == len(words) - 1 and line.break_point and line.break_point.type == BreakPointType.HYPHEN:
-                result.append(line.break_point.hyphenated_text)
+                text_to_add = line.break_point.hyphenated_text
             else:
-                result.append(word.text)
+                text_to_add = word.text
+            
+            if i == 0 and pending_remaining:
+                result.append(pending_remaining)
+                if not word.is_punctuation:
+                    result.append(' ')
+            
+            result.append(text_to_add)
             
             if i < len(words) - 1:
                 if words[i + 1].is_punctuation:
@@ -501,13 +633,22 @@ class Typesetter:
         
         return rendered
     
-    def _render_flush_left(self, line: Line, words: List[Word]) -> str:
+    def _render_flush_left(self, line: Line, words: List[Word], pending_remaining: Optional[str] = None) -> str:
         result = []
         for i, word in enumerate(words):
+            text_to_add = ''
+            
             if i == len(words) - 1 and line.break_point and line.break_point.type == BreakPointType.HYPHEN:
-                result.append(line.break_point.hyphenated_text)
+                text_to_add = line.break_point.hyphenated_text
             else:
-                result.append(word.text)
+                text_to_add = word.text
+            
+            if i == 0 and pending_remaining:
+                result.append(pending_remaining)
+                if not word.is_punctuation:
+                    result.append(' ')
+            
+            result.append(text_to_add)
             
             if i < len(words) - 1:
                 if not words[i + 1].is_punctuation:
@@ -518,18 +659,33 @@ class Typesetter:
     def render_with_analysis(self, layout: LayoutResult) -> Tuple[str, List[dict]]:
         rendered_lines = []
         analysis = []
+        pending_remaining = None
         
         for line_idx, line in enumerate(layout.lines):
-            rendered = self._render_line(line)
+            current_pending = pending_remaining
+            rendered = self._render_line(line, current_pending)
             rendered_lines.append(rendered)
+            
+            if line.break_point and line.break_point.type == BreakPointType.HYPHEN:
+                pending_remaining = line.break_point.remaining_text
+            else:
+                pending_remaining = None
             
             num_spaces = len(line.words) - 1
             tightness = "tight" if line.adjustment_ratio < -0.5 else \
                        "loose" if line.adjustment_ratio > 0.5 else "normal"
             
             words_text = []
-            for w in line.words:
-                words_text.append(w.text)
+            for i, w in enumerate(line.words):
+                display_text = w.text
+                if i == len(line.words) - 1 and line.break_point and line.break_point.type == BreakPointType.HYPHEN:
+                    display_text = line.break_point.hyphenated_text
+                
+                if i == 0 and current_pending:
+                    words_text.append(current_pending)
+                    words_text.append(display_text)
+                else:
+                    words_text.append(display_text)
             
             analysis.append({
                 'line_number': line_idx + 1,

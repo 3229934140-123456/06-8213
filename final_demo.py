@@ -1,3 +1,7 @@
+import sys
+import io
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+
 from text_breaking import (
     compare_algorithms, tokenize,
     GreedyLineBreaker, KnuthPlassLineBreaker, Typesetter
@@ -60,8 +64,16 @@ def print_side_by_side(text_name: str, text: str, target_width: float):
     
     col_width = int(target_width / 0.4) + 25
     
+    greedy_num_lines = greedy['num_lines']
+    greedy_total_penalty = greedy['total_penalty']
+    kp_num_lines = kp['num_lines']
+    kp_total_penalty = kp['total_penalty']
+    
+    g_header = f"  行数: {greedy_num_lines}  惩罚: {greedy_total_penalty:.1f}"
+    k_header = f"  行数: {kp_num_lines}  惩罚: {kp_total_penalty:.1f}"
+    
     print(f"{' 贪心断行 ':=^{col_width}} | {' Knuth-Plass ':=^{col_width}}")
-    print(f"{'  行数: ' + str(greedy['num_lines']) + '  惩罚: ' + f'{greedy['total_penalty']:.1f}':<{col_width}} | {'  行数: ' + str(kp['num_lines']) + '  惩罚: ' + f'{kp['total_penalty']:.1f}':<{col_width}}")
+    print(f"{g_header:<{col_width}} | {k_header:<{col_width}}")
     print(f"{'-' * col_width} | {'-' * col_width}")
     
     greedy_lines = greedy['text'].split('\n')
@@ -78,12 +90,12 @@ def print_side_by_side(text_name: str, text: str, target_width: float):
         
         g_info = ''
         if g_analysis:
-            mark = '⚠️ ' if g_analysis['tightness'] != 'normal' else '✓ '
+            mark = '[!]' if g_analysis['tightness'] != 'normal' else '[OK]'
             g_info = f" {mark}{g_analysis['tightness']:6s} r={g_analysis['adjustment_ratio']:5.2f}"
         
         k_info = ''
         if k_analysis:
-            mark = '⚠️ ' if k_analysis['tightness'] != 'normal' else '✓ '
+            mark = '[!]' if k_analysis['tightness'] != 'normal' else '[OK]'
             k_info = f" {mark}{k_analysis['tightness']:6s} r={k_analysis['adjustment_ratio']:5.2f}"
         
         g_display = g_line[:col_width - 25]
@@ -95,7 +107,9 @@ def print_side_by_side(text_name: str, text: str, target_width: float):
     
     penalty_improvement = greedy['total_penalty'] - kp['total_penalty']
     if penalty_improvement > 0 and greedy['total_penalty'] > 0:
-        print(f"{'KP 惩罚降低: ' + f'{penalty_improvement:.1f} ({(penalty_improvement/greedy['total_penalty']*100):.1f}%)':>{col_width * 2 + 3}}")
+        pct = (penalty_improvement / greedy['total_penalty']) * 100
+        imp_msg = f"KP 惩罚降低: {penalty_improvement:.1f} ({pct:.1f}%)"
+        print(f"{imp_msg:>{col_width * 2 + 3}}")
     
     loose_diff = greedy['loose_lines'] - kp['loose_lines']
     tight_diff = greedy['tight_lines'] - kp['tight_lines']
