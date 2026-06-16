@@ -267,13 +267,31 @@ class GreedyLineBreaker:
                 current_width = projected_width
                 word_count += 1
                 i += 1
-            else:
-                if i < len(words) and words[i].is_punctuation and word_count > 0:
-                    current_width += additional_width
-                    word_count += 1
-                    i += 1
-                    continue
+                continue
+            
+            if i < len(words) and words[i].is_punctuation and word_count > 0:
+                current_width += additional_width
+                word_count += 1
+                i += 1
+                continue
+            
+            hyphen_bp = self._try_hyphenate_current_line(words, i, current_width)
+            
+            if hyphen_bp:
+                line_words = words[current_start:i + 1]
+                num_spaces = 0
+                for j in range(len(line_words) - 1):
+                    if not line_words[j + 1].is_punctuation:
+                        num_spaces += 1
                 
+                line = self._make_line(line_words, hyphen_bp, num_spaces)
+                lines.append(line)
+                total_penalty += self._compute_line_penalty(words, current_start, i, hyphen_bp, line.actual_width, num_spaces)
+                
+                current_start = i + 1
+                current_width = 0.0
+                word_count = 0
+            else:
                 end_idx = i - 1
                 
                 if end_idx >= current_start and i < len(words) and words[i].is_punctuation and end_idx + 1 < len(words):
@@ -319,6 +337,42 @@ class GreedyLineBreaker:
         lines = self._fix_punctuation_orphans(lines, words)
         
         return LayoutResult(lines=lines, total_penalty=total_penalty, algorithm="greedy")
+    
+    def _try_hyphenate_current_line(self, words, word_idx, current_width):
+        if word_idx <= 0 or word_idx >= len(words):
+            return None
+        
+        word = words[word_idx]
+        if word.is_punctuation or len(word.text) < 5:
+            return None
+        
+        hyphen_points = find_hyphenation_points(word, self.hyphen_dict)
+        if not hyphen_points:
+            return None
+        
+        available = self.target_width - current_width - self.space_glue.ideal_width
+        if available <= 0:
+            return None
+        
+        best_bp = None
+        best_fill = -1
+        
+        for pos, penalty in hyphen_points:
+            hyp_text = word.text[:pos] + '-'
+            hyp_width = measure_text(hyp_text)
+            if hyp_width <= available:
+                fill = hyp_width / available
+                if fill > best_fill:
+                    best_fill = fill
+                    best_bp = BreakPoint(
+                        word_index=word_idx - 1,
+                        type=BreakPointType.HYPHEN,
+                        penalty=penalty,
+                        hyphenated_text=hyp_text,
+                        remaining_text=word.text[pos:]
+                    )
+        
+        return best_bp
     
     def _fix_punctuation_orphans(self, lines: List[Line], all_words: List[Word]) -> List[Line]:
         if len(lines) < 2:
@@ -673,6 +727,8 @@ class Typesetter:
     def _render_line(self, line: Line, pending_remaining: Optional[str] = None) -> str:
         words = line.words
         if not words:
+            if pending_remaining:
+                return pending_remaining
             return ''
         
         is_last_line = line.break_point and line.break_point.type == BreakPointType.FORCED
