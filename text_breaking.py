@@ -311,51 +311,91 @@ class GreedyLineBreaker:
         if len(lines) < 2:
             return lines
         
-        fixed = []
-        i = 0
-        while i < len(lines):
-            current_line = lines[i]
-            is_last_line = (i == len(lines) - 1)
-            
-            if current_line.words and current_line.words[0].is_punctuation and i > 0 and not is_last_line:
-                prev_line = fixed[-1]
-                punct_word = current_line.words[0]
+        changed = True
+        while changed:
+            changed = False
+            new_lines = []
+            i = 0
+            while i < len(lines):
+                current_line = lines[i]
+                is_last = (i == len(lines) - 1)
+                need_merge = False
                 
-                new_prev_words = prev_line.words + [punct_word]
-                new_prev_num_spaces = 0
-                for j in range(len(new_prev_words) - 1):
-                    if not new_prev_words[j + 1].is_punctuation:
-                        new_prev_num_spaces += 1
+                if current_line.words and current_line.words[0].is_punctuation and i > 0:
+                    if not is_last:
+                        need_merge = True
+                    elif is_last and all(w.is_punctuation for w in current_line.words):
+                        need_merge = True
+                    elif is_last and current_line.words[0].is_punctuation:
+                        need_merge = True
                 
-                new_prev_bp = prev_line.break_point
-                if new_prev_bp:
-                    new_prev_bp = BreakPoint(
-                        word_index=prev_line.break_point.word_index + 1,
-                        type=prev_line.break_point.type,
-                        penalty=prev_line.break_point.penalty,
-                        hyphenated_text=prev_line.break_point.hyphenated_text,
-                        remaining_text=prev_line.break_point.remaining_text
-                    )
-                
-                new_prev_line = self._make_line(new_prev_words, new_prev_bp, new_prev_num_spaces, is_last=(i == len(lines) - 1 and len(current_line.words) == 1))
-                fixed[-1] = new_prev_line
-                
-                if len(current_line.words) > 1:
-                    remaining_words = current_line.words[1:]
-                    new_num_spaces = 0
-                    for j in range(len(remaining_words) - 1):
-                        if not remaining_words[j + 1].is_punctuation:
-                            new_num_spaces += 1
+                if need_merge:
+                    prev_line = new_lines[-1] if new_lines else lines[i - 1]
+                    merge_words = []
                     
-                    new_bp = current_line.break_point
-                    new_line = self._make_line(remaining_words, new_bp, new_num_spaces, is_last=(i == len(lines) - 1))
-                    fixed.append(new_line)
-            else:
-                fixed.append(current_line)
+                    if is_last and all(w.is_punctuation for w in current_line.words):
+                        merge_words = current_line.words
+                    elif current_line.words[0].is_punctuation:
+                        merge_words = [current_line.words[0]]
+                    
+                    if merge_words:
+                        merged_words = prev_line.words + merge_words
+                        merged_num_spaces = 0
+                        for j in range(len(merged_words) - 1):
+                            if not merged_words[j + 1].is_punctuation:
+                                merged_num_spaces += 1
+                        
+                        remaining_words = current_line.words[len(merge_words):]
+                        is_really_last = is_last and len(remaining_words) == 0
+                        
+                        if is_really_last:
+                            merged_bp = BreakPoint(
+                                word_index=prev_line.break_point.word_index + len(merge_words) if prev_line.break_point else 0,
+                                type=BreakPointType.FORCED,
+                                penalty=-1000
+                            )
+                        elif prev_line.break_point and prev_line.break_point.type == BreakPointType.HYPHEN:
+                            merged_bp = BreakPoint(
+                                word_index=prev_line.break_point.word_index + len(merge_words),
+                                type=BreakPointType.HYPHEN,
+                                penalty=prev_line.break_point.penalty,
+                                hyphenated_text=prev_line.break_point.hyphenated_text,
+                                remaining_text=prev_line.break_point.remaining_text
+                            )
+                        else:
+                            merged_bp = BreakPoint(
+                                word_index=prev_line.break_point.word_index + len(merge_words) if prev_line.break_point else 0,
+                                type=BreakPointType.FORCED,
+                                penalty=-1000
+                            )
+                        
+                        merged_line = self._make_line(merged_words, merged_bp, merged_num_spaces, is_last=True)
+                        
+                        if new_lines:
+                            new_lines[-1] = merged_line
+                        else:
+                            new_lines.append(merged_line)
+                        
+                        remaining_words = current_line.words[len(merge_words):]
+                        if remaining_words:
+                            rem_num_spaces = 0
+                            for j in range(len(remaining_words) - 1):
+                                if not remaining_words[j + 1].is_punctuation:
+                                    rem_num_spaces += 1
+                            rem_line = self._make_line(remaining_words, current_line.break_point, rem_num_spaces, is_last=is_last)
+                            new_lines.append(rem_line)
+                        
+                        changed = True
+                    else:
+                        new_lines.append(current_line)
+                else:
+                    new_lines.append(current_line)
+                
+                i += 1
             
-            i += 1
+            lines = new_lines
         
-        return fixed
+        return lines
     
     def _make_line(self, words: List[Word], break_point: BreakPoint, num_spaces: int, is_last: bool = False) -> Line:
         line_width = compute_line_width(words, 0, len(words) - 1, break_point, self.space_glue)
@@ -434,8 +474,9 @@ class KnuthPlassLineBreaker:
                             num_spaces += 1
                     line_width = compute_line_width(line_words, 0, len(line_words) - 1, bp, self.space_glue)
                     
-                    if num_spaces == 0 and line_width > self.target_width * 1.2:
-                        continue
+                    if line_width > self.target_width * 2.5:
+                        if bp.type != BreakPointType.FORCED or line_width > self.target_width * 3.5:
+                            continue
                     
                     penalty = compute_break_penalty(
                         words, j, i - 1, bp,
@@ -448,7 +489,8 @@ class KnuthPlassLineBreaker:
                             penalty = 0
                         else:
                             overflow = line_width - self.target_width
-                            penalty = 100 * (overflow ** 2)
+                            ratio = overflow / self.target_width
+                            penalty = 100 * (overflow ** 2) * (1 + ratio)
                     
                     total = dp[j] + penalty
                     if total < dp[i]:
@@ -487,51 +529,91 @@ class KnuthPlassLineBreaker:
         if len(lines) < 2:
             return lines
         
-        fixed = []
-        i = 0
-        while i < len(lines):
-            current_line = lines[i]
-            is_last_line = (i == len(lines) - 1)
-            
-            if current_line.words and current_line.words[0].is_punctuation and i > 0 and not is_last_line:
-                prev_line = fixed[-1]
-                punct_word = current_line.words[0]
+        changed = True
+        while changed:
+            changed = False
+            new_lines = []
+            i = 0
+            while i < len(lines):
+                current_line = lines[i]
+                is_last = (i == len(lines) - 1)
+                need_merge = False
                 
-                new_prev_words = prev_line.words + [punct_word]
-                new_prev_num_spaces = 0
-                for j in range(len(new_prev_words) - 1):
-                    if not new_prev_words[j + 1].is_punctuation:
-                        new_prev_num_spaces += 1
+                if current_line.words and current_line.words[0].is_punctuation and i > 0:
+                    if not is_last:
+                        need_merge = True
+                    elif is_last and all(w.is_punctuation for w in current_line.words):
+                        need_merge = True
+                    elif is_last and current_line.words[0].is_punctuation:
+                        need_merge = True
                 
-                new_prev_bp = prev_line.break_point
-                if new_prev_bp:
-                    new_prev_bp = BreakPoint(
-                        word_index=prev_line.break_point.word_index + 1,
-                        type=prev_line.break_point.type,
-                        penalty=prev_line.break_point.penalty,
-                        hyphenated_text=prev_line.break_point.hyphenated_text,
-                        remaining_text=prev_line.break_point.remaining_text
-                    )
-                
-                new_prev_line = self._make_line(new_prev_words, new_prev_bp, new_prev_num_spaces, is_last=(i == len(lines) - 1 and len(current_line.words) == 1))
-                fixed[-1] = new_prev_line
-                
-                if len(current_line.words) > 1:
-                    remaining_words = current_line.words[1:]
-                    new_num_spaces = 0
-                    for j in range(len(remaining_words) - 1):
-                        if not remaining_words[j + 1].is_punctuation:
-                            new_num_spaces += 1
+                if need_merge:
+                    prev_line = new_lines[-1] if new_lines else lines[i - 1]
+                    merge_words = []
                     
-                    new_bp = current_line.break_point
-                    new_line = self._make_line(remaining_words, new_bp, new_num_spaces, is_last=(i == len(lines) - 1))
-                    fixed.append(new_line)
-            else:
-                fixed.append(current_line)
+                    if is_last and all(w.is_punctuation for w in current_line.words):
+                        merge_words = current_line.words
+                    elif current_line.words[0].is_punctuation:
+                        merge_words = [current_line.words[0]]
+                    
+                    if merge_words:
+                        merged_words = prev_line.words + merge_words
+                        merged_num_spaces = 0
+                        for j in range(len(merged_words) - 1):
+                            if not merged_words[j + 1].is_punctuation:
+                                merged_num_spaces += 1
+                        
+                        remaining_words = current_line.words[len(merge_words):]
+                        is_really_last = is_last and len(remaining_words) == 0
+                        
+                        if is_really_last:
+                            merged_bp = BreakPoint(
+                                word_index=prev_line.break_point.word_index + len(merge_words) if prev_line.break_point else 0,
+                                type=BreakPointType.FORCED,
+                                penalty=-1000
+                            )
+                        elif prev_line.break_point and prev_line.break_point.type == BreakPointType.HYPHEN:
+                            merged_bp = BreakPoint(
+                                word_index=prev_line.break_point.word_index + len(merge_words),
+                                type=BreakPointType.HYPHEN,
+                                penalty=prev_line.break_point.penalty,
+                                hyphenated_text=prev_line.break_point.hyphenated_text,
+                                remaining_text=prev_line.break_point.remaining_text
+                            )
+                        else:
+                            merged_bp = BreakPoint(
+                                word_index=prev_line.break_point.word_index + len(merge_words) if prev_line.break_point else 0,
+                                type=BreakPointType.FORCED,
+                                penalty=-1000
+                            )
+                        
+                        merged_line = self._make_line(merged_words, merged_bp, merged_num_spaces, is_last=True)
+                        
+                        if new_lines:
+                            new_lines[-1] = merged_line
+                        else:
+                            new_lines.append(merged_line)
+                        
+                        remaining_words = current_line.words[len(merge_words):]
+                        if remaining_words:
+                            rem_num_spaces = 0
+                            for j in range(len(remaining_words) - 1):
+                                if not remaining_words[j + 1].is_punctuation:
+                                    rem_num_spaces += 1
+                            rem_line = self._make_line(remaining_words, current_line.break_point, rem_num_spaces, is_last=is_last)
+                            new_lines.append(rem_line)
+                        
+                        changed = True
+                    else:
+                        new_lines.append(current_line)
+                else:
+                    new_lines.append(current_line)
+                
+                i += 1
             
-            i += 1
+            lines = new_lines
         
-        return fixed
+        return lines
     
     def _make_line(self, words: List[Word], break_point: BreakPoint, num_spaces: int, is_last: bool = False) -> Line:
         line_width = compute_line_width(words, 0, len(words) - 1, break_point, self.space_glue)

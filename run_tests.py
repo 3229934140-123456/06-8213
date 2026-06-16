@@ -21,6 +21,8 @@ def run_tests():
     all_passed &= test_hyphenation_text_integrity()
     all_passed &= test_punctuation_not_orphaned()
     all_passed &= test_greedy_punctuation_handling()
+    all_passed &= test_end_punctuation_not_alone()
+    all_passed &= test_narrow_width_hyphenation_integrity()
     
     print("\n" + "=" * 80)
     if all_passed:
@@ -99,30 +101,36 @@ def test_hyphenation_text_integrity():
         ("Understanding antidisestablishmentarianism is difficult.", 6.0),
         ("The implementation demonstrates hyphenation capabilities.", 5.5),
         ("A simple short text without hyphenation.", 4.0),
+        ("The extraordinary programming challenges.", 3.0),
+        ("Consider extraordinary implementation.", 3.5),
+        ("Programming is extraordinary.", 3.0),
     ]
     
     all_passed = True
     
     for text, width in test_cases:
-        words = tokenize(text)
-        breaker = KnuthPlassLineBreaker(width)
-        layout = breaker.break_lines(words)
-        typesetter = Typesetter(width, justify=True)
-        rendered = typesetter.render(layout)
-        
-        reconstructed = reconstruct_text(rendered)
-        
-        status = "[OK]" if reconstructed == text else "[FAIL]"
-        if reconstructed != text:
-            all_passed = False
-        
-        has_hyphen = any(line.rstrip().endswith('-') for line in rendered.split('\n')[:-1])
-        hyphen_note = " (含连字符断词)" if has_hyphen else " (无连字符断词)"
-        
-        print(f"  {status} 行宽={width}{hyphen_note}")
-        if reconstructed != text:
-            print(f"     原文:     '{text}'")
-            print(f"     还原后:   '{reconstructed}'")
+        for breaker_name, breaker_class in [("Greedy", GreedyLineBreaker), ("KP", KnuthPlassLineBreaker)]:
+            words = tokenize(text)
+            breaker = breaker_class(width)
+            layout = breaker.break_lines(words)
+            typesetter = Typesetter(width, justify=True)
+            rendered = typesetter.render(layout)
+            
+            reconstructed = reconstruct_text(rendered)
+            
+            status = "[OK]" if reconstructed == text else "[FAIL]"
+            if reconstructed != text:
+                all_passed = False
+            
+            has_hyphen = any(line.rstrip().endswith('-') for line in rendered.split('\n')[:-1])
+            hyphen_note = " (含连字符断词)" if has_hyphen else " (无连字符断词)"
+            
+            print(f"  {status} {breaker_name} 行宽={width}{hyphen_note}")
+            if reconstructed != text:
+                print(f"     原文:     '{text}'")
+                print(f"     还原后:   '{reconstructed}'")
+                for i, line in enumerate(rendered.split('\n')):
+                    print(f"     渲染行{i+1}: |{line}|")
     
     return all_passed
 
@@ -137,6 +145,10 @@ def test_punctuation_not_orphaned():
         ("When considering punctuation, we must avoid 'orphaned' punctuation at line breaks.", 4.5),
         ("A, B, C, D, E, F, G. These letters should not have commas alone on lines.", 3.0),
         ("Is this a question? Yes! It certainly is.", 3.5),
+        ("Hello world.", 2.0),
+        ("Is this ok?", 2.5),
+        ("It works.", 2.0),
+        ("Stop. Go? Wait!", 2.0),
     ]
     
     all_passed = True
@@ -169,6 +181,9 @@ def test_punctuation_not_orphaned():
             if has_orphan:
                 for ln, content in orphan_lines:
                     print(f"     [WARN] 第 {ln} 行行首出现标点: '{content}'")
+                print(f"     原文:   '{text}'")
+                for i, line in enumerate(lines):
+                    print(f"     渲染行{i+1}: |{line}|")
     
     return all_passed
 
@@ -222,6 +237,93 @@ def test_greedy_punctuation_handling():
         if has_orphan:
             for ln, content in orphan_lines:
                 print(f"     [WARN] 第 {ln} 行行首出现孤立标点")
+    
+    return all_passed
+
+
+def test_end_punctuation_not_alone():
+    print("\n" + "-" * 80)
+    print("测试 5: 段尾标点不单独成行")
+    print("-" * 80)
+    
+    test_cases = [
+        ("Hello world.", 2.0),
+        ("Hello world.", 1.5),
+        ("Is this ok?", 2.0),
+        ("It works.", 2.0),
+        ("The extraordinary programming challenges.", 5.0),
+        ("The extraordinary programming challenges.", 3.0),
+        ("Understanding antidisestablishmentarianism.", 5.0),
+        ("The implementation demonstrates.", 4.0),
+        ("A, B, C, D.", 2.0),
+    ]
+    
+    all_passed = True
+    
+    for text, width in test_cases:
+        for breaker_name, breaker_class in [("Greedy", GreedyLineBreaker), ("KP", KnuthPlassLineBreaker)]:
+            words = tokenize(text)
+            breaker = breaker_class(width)
+            layout = breaker.break_lines(words)
+            typesetter = Typesetter(width, justify=True)
+            rendered = typesetter.render(layout)
+            
+            lines = rendered.split('\n')
+            last_line = lines[-1].strip()
+            
+            last_line_words = layout.lines[-1].words
+            all_punct = all(w.is_punctuation for w in last_line_words)
+            
+            status = "[OK]" if not all_punct else "[FAIL]"
+            if all_punct:
+                all_passed = False
+            
+            print(f"  {status} {breaker_name} 行宽={width} 末行='|{last_line}|'")
+            if all_punct:
+                print(f"     原文: '{text}'")
+                for i, line in enumerate(lines):
+                    print(f"     渲染行{i+1}: |{line}|")
+    
+    return all_passed
+
+
+def test_narrow_width_hyphenation_integrity():
+    print("\n" + "-" * 80)
+    print("测试 6: 极窄宽度下连字符断词+文本完整性")
+    print("-" * 80)
+    
+    test_cases = [
+        ("The extraordinary programming challenges.", 3.0),
+        ("Hello world.", 1.5),
+        ("Understanding antidisestablishmentarianism.", 4.0),
+        ("Consider extraordinary implementation.", 3.5),
+        ("Programming is extraordinary.", 3.0),
+        ("The implementation demonstrates.", 3.0),
+    ]
+    
+    all_passed = True
+    
+    for text, width in test_cases:
+        for breaker_name, breaker_class in [("Greedy", GreedyLineBreaker), ("KP", KnuthPlassLineBreaker)]:
+            words = tokenize(text)
+            breaker = breaker_class(width)
+            layout = breaker.break_lines(words)
+            typesetter = Typesetter(width, justify=True)
+            rendered = typesetter.render(layout)
+            
+            reconstructed = reconstruct_text(rendered)
+            match = (reconstructed == text)
+            
+            if not match:
+                all_passed = False
+            
+            status = "[OK]" if match else "[FAIL]"
+            print(f"  {status} {breaker_name} 行宽={width}")
+            if not match:
+                print(f"     原文:   '{text}'")
+                print(f"     还原:   '{reconstructed}'")
+                for i, line in enumerate(rendered.split('\n')):
+                    print(f"     渲染行{i+1}: |{line}|")
     
     return all_passed
 
