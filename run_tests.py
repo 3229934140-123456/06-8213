@@ -91,6 +91,16 @@ def reconstruct_text(rendered: str) -> str:
     return text
 
 
+def print_failure_detail(original, rendered, label=""):
+    reconstructed = reconstruct_text(rendered)
+    if label:
+        print(f"     [{label}]")
+    print(f"     原文:   '{original}'")
+    print(f"     还原:   '{reconstructed}'")
+    for i, line in enumerate(rendered.split('\n')):
+        print(f"     渲染行{i+1}: |{line}|")
+
+
 def test_hyphenation_text_integrity():
     print("\n" + "-" * 80)
     print("测试 2: 连字符断词后文本完整性验证")
@@ -127,10 +137,7 @@ def test_hyphenation_text_integrity():
             
             print(f"  {status} {breaker_name} 行宽={width}{hyphen_note}")
             if reconstructed != text:
-                print(f"     原文:     '{text}'")
-                print(f"     还原后:   '{reconstructed}'")
-                for i, line in enumerate(rendered.split('\n')):
-                    print(f"     渲染行{i+1}: |{line}|")
+                print_failure_detail(text, rendered, "文本还原不匹配")
     
     return all_passed
 
@@ -181,9 +188,7 @@ def test_punctuation_not_orphaned():
             if has_orphan:
                 for ln, content in orphan_lines:
                     print(f"     [WARN] 第 {ln} 行行首出现标点: '{content}'")
-                print(f"     原文:   '{text}'")
-                for i, line in enumerate(lines):
-                    print(f"     渲染行{i+1}: |{line}|")
+                print_failure_detail(text, rendered, "标点孤立")
     
     return all_passed
 
@@ -237,6 +242,7 @@ def test_greedy_punctuation_handling():
         if has_orphan:
             for ln, content in orphan_lines:
                 print(f"     [WARN] 第 {ln} 行行首出现孤立标点")
+            print_failure_detail(text, rendered, "标点孤立")
     
     return all_passed
 
@@ -280,9 +286,7 @@ def test_end_punctuation_not_alone():
             
             print(f"  {status} {breaker_name} 行宽={width} 末行='|{last_line}|'")
             if all_punct:
-                print(f"     原文: '{text}'")
-                for i, line in enumerate(lines):
-                    print(f"     渲染行{i+1}: |{line}|")
+                print_failure_detail(text, rendered, "段尾标点单独成行")
     
     return all_passed
 
@@ -320,10 +324,7 @@ def test_narrow_width_hyphenation_integrity():
             status = "[OK]" if match else "[FAIL]"
             print(f"  {status} {breaker_name} 行宽={width}")
             if not match:
-                print(f"     原文:   '{text}'")
-                print(f"     还原:   '{reconstructed}'")
-                for i, line in enumerate(rendered.split('\n')):
-                    print(f"     渲染行{i+1}: |{line}|")
+                print_failure_detail(text, rendered, "文本还原不匹配")
     
     return all_passed
 

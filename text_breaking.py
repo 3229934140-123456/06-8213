@@ -100,9 +100,21 @@ def tokenize(text: str) -> List[Word]:
     return words
 
 
-def find_hyphenation_points(word: Word) -> List[Tuple[int, float]]:
-    points = []
+def find_hyphenation_points(word: Word, hyphen_dict: Optional[dict] = None) -> List[Tuple[int, float]]:
     text = word.text
+    lower_text = text.lower()
+    
+    if hyphen_dict and lower_text in hyphen_dict:
+        dict_points = hyphen_dict[lower_text]
+        if isinstance(dict_points, list):
+            points = []
+            for pos in dict_points:
+                if isinstance(pos, int) and 2 <= pos <= len(text) - 2:
+                    points.append((pos, 0.1))
+            if points:
+                return points
+    
+    points = []
     if len(text) < 5:
         return points
     
@@ -124,7 +136,7 @@ def find_hyphenation_points(word: Word) -> List[Tuple[int, float]]:
     return points
 
 
-def generate_candidate_breakpoints(words: List[Word]) -> List[BreakPoint]:
+def generate_candidate_breakpoints(words: List[Word], hyphen_dict: Optional[dict] = None) -> List[BreakPoint]:
     breakpoints: List[BreakPoint] = []
     
     for i, word in enumerate(words):
@@ -143,7 +155,7 @@ def generate_candidate_breakpoints(words: List[Word]) -> List[BreakPoint]:
                 ))
         
         if not word.is_punctuation and len(word.text) >= 5:
-            hyphen_points = find_hyphenation_points(word)
+            hyphen_points = find_hyphenation_points(word, hyphen_dict)
             for pos, penalty in hyphen_points:
                 breakpoints.append(BreakPoint(
                     word_index=i,
@@ -218,7 +230,7 @@ def compute_break_penalty(
 
 
 class GreedyLineBreaker:
-    def __init__(self, target_width: float, space_glue: Optional[Glue] = None):
+    def __init__(self, target_width: float, space_glue: Optional[Glue] = None, hyphen_dict: Optional[dict] = None):
         self.target_width = target_width
         self.space_glue = space_glue or Glue(
             min_width=0.3,
@@ -227,6 +239,7 @@ class GreedyLineBreaker:
             stretchability=0.2,
             shrinkability=0.1
         )
+        self.hyphen_dict = hyphen_dict
     
     def break_lines(self, words: List[Word]) -> LayoutResult:
         lines: List[Line] = []
@@ -428,7 +441,7 @@ class GreedyLineBreaker:
 
 
 class KnuthPlassLineBreaker:
-    def __init__(self, target_width: float, space_glue: Optional[Glue] = None):
+    def __init__(self, target_width: float, space_glue: Optional[Glue] = None, hyphen_dict: Optional[dict] = None):
         self.target_width = target_width
         self.space_glue = space_glue or Glue(
             min_width=0.3,
@@ -437,12 +450,13 @@ class KnuthPlassLineBreaker:
             stretchability=0.2,
             shrinkability=0.1
         )
+        self.hyphen_dict = hyphen_dict
     
     def break_lines(self, words: List[Word]) -> LayoutResult:
         if not words:
             return LayoutResult(lines=[], total_penalty=0.0, algorithm="knuth-plass")
         
-        breakpoints = generate_candidate_breakpoints(words)
+        breakpoints = generate_candidate_breakpoints(words, self.hyphen_dict)
         breakpoints.append(BreakPoint(
             word_index=len(words) - 1,
             type=BreakPointType.FORCED,
